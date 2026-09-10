@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="warm">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#181a1d">
+  <title>背单词 · 你还不背？</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/x-icon" href="/icons/favicon.ico?v=1.26.0">
+  <link rel="stylesheet" href="../../shared/global.css?v=1.26.0">
+  <link rel="stylesheet" href="style.css?v=1.26.0">
+  <link rel="stylesheet" href="../../shared/arknights.css?v=1.26.0">
+  <link rel="stylesheet" href="arknights.css?v=1.26.0">
+</head>
+<body>
+  <!-- 词库选择（完全离线，原“用户”即词库，各自独立进度） -->
+  <div class="user-select-overlay" id="userSelectOverlay">
+    <div class="user-select-title">选择词库</div>
+    <div class="user-select-sub">两个词库各自独立记录学习进度</div>
+    <div class="user-select-btns">
+      <button class="user-select-btn" data-user="cet6">CET6</button>
+      <button class="user-select-btn" data-user="ielts">IELTS-8000</button>
+    </div>
+  </div>
+
+  <!-- ================= 学习概览页 ================= -->
+  <section id="overviewPage">
+    <header class="topbar">
+      <a class="topbar-back" href="../../index.html">← 返回</a>
+      <div class="topbar-title" id="pageTitle">背单词</div>
+      <div class="topbar-spacer"></div>
+    </header>
+
+    <main class="overview page-enter">
+      <section class="stats-grid">
+        <button class="stat-card glass clickable" id="cardMastered" data-panel="ARCHIVE / 已掌握">
+          <div class="stat-value" id="statMastered">– / –</div>
+          <div class="stat-label">已掌握 / 总词数 · 点击查看</div>
+        </button>
+        <button class="stat-card glass clickable" id="cardNew" data-panel="NEW / 待学习">
+          <div class="stat-value" id="statNew">–</div>
+          <div class="stat-label">待学习词数 · 点击查看</div>
+        </button>
+        <button class="stat-card glass clickable" id="cardDue" data-panel="DUE / 待复习">
+          <div class="stat-value" id="statDue">–</div>
+          <div class="stat-label">待复习词数 · 点击查看</div>
+        </button>
+        <div class="stat-card glass" data-panel="PLAN / 预计天数">
+          <div class="stat-value" id="statDays">–</div>
+          <div class="stat-label">预计完成天数</div>
+        </div>
+      </section>
+
+      <section class="chart-card glass">
+        <h2 class="chart-title">
+          <span>近 7 天学习趋势</span>
+          <span class="section-code">LEARNING LOG / 07 DAYS</span>
+        </h2>
+        <canvas id="trendChart" aria-label="近7天学习趋势柱状图"></canvas>
+      </section>
+
+      <details class="settings-panel glass">
+        <summary>设置 <span class="settings-hint">每日目标 · 新词/复习比例 · 主题 · API · 导入词表</span></summary>
+        <div class="settings-body">
+          <div class="setting-row">
+            <label for="dailyGoalInput">每日目标（词）</label>
+            <input type="number" id="dailyGoalInput" min="1" max="300" step="1" value="30">
+          </div>
+
+          <div class="setting-row">
+            <label for="newRatioSlider">新词 / 复习比例 <span id="ratioLabel" class="ratio-label">新词 70% · 复习 30%</span></label>
+            <input type="range" id="newRatioSlider" min="0" max="100" step="5" value="70">
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">主题</span>
+            <div class="theme-options">
+              <button class="theme-option" id="ovThemeWarm">暖白</button>
+              <button class="theme-option" id="ovThemeCool">冷白</button>
+              <button class="theme-option" id="ovThemeSolid">纯色</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">AI 模型配置</span>
+            <label for="aiUrlInput">API Base URL</label>
+            <input type="text" id="aiUrlInput" autocomplete="off" placeholder="必填，例：https://api.siliconflow.cn/v1">
+            <label for="apiKeyInput" style="margin-top:6px">API Key</label>
+            <input type="password" id="apiKeyInput" autocomplete="off" placeholder="必填，AI 接口的 API Key">
+            <label for="aiModelInput" style="margin-top:6px">模型名称</label>
+            <input type="text" id="aiModelInput" autocomplete="off" placeholder="必填，如 GLM-4-Flash">
+            <button type="button" class="btn btn-ghost btn-mini" id="fetchModelsBtn">获取模型列表</button>
+            <div class="ai-model-list hidden" id="aiModelList"></div>
+            <p class="setting-note">支持 OpenAI 兼容接口（硅基流动、智谱、DeepSeek 等）。填好 URL / Key 后可点“获取模型列表”挑选，也可以直接手输模型名称；留空则 AI 功能不可用。</p>
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">深度思考</span>
+            <div class="theme-options">
+              <button class="theme-option" id="thinkOff">关闭（快）</button>
+              <button class="theme-option" id="thinkOn">开启（更准）</button>
+            </div>
+            <p class="setting-note">推理模型（如 DeepSeek V4）自带思考：回答前先"想"一遍，慢且会吃光 token 上限。查词/例句关掉更快；需要深入分析再开。</p>
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">AI 人设（追问问答）</span>
+            <div class="theme-options">
+              <button class="theme-option" id="personaCat">可爱猫娘</button>
+              <button class="theme-option" id="personaBro">暴躁老哥</button>
+            </div>
+            <textarea class="input" id="aiPersonaInput" rows="4" placeholder="自定义 AI 人设提示词"></textarea>
+            <p class="setting-note">人设只影响“追问 AI”的问答语气，不影响知识卡生成。</p>
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">导入词表（txt）</span>
+            <label class="btn btn-ghost file-btn" for="importFile">选择 txt 文件</label>
+            <input type="file" id="importFile" accept=".txt,text/plain" class="hidden">
+            <p class="setting-note">每行格式：<code>英文 - 中文</code>。新词会追加到当前词库。</p>
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">数据备份</span>
+            <div class="danger-actions">
+              <button class="btn btn-ghost" id="exportBackup">导出备份</button>
+              <label class="btn btn-ghost file-btn" for="importBackupFile">从备份恢复</label>
+              <input type="file" id="importBackupFile" accept=".json,application/json" class="hidden">
+            </div>
+            <p class="setting-note">备份包含学习进度、设置与 AI 知识缓存；建议定期导出保存。</p>
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">发音口音</span>
+            <div class="theme-options">
+              <button class="theme-option" id="ovAccentUs">美音</button>
+              <button class="theme-option" id="ovAccentGb">英音</button>
+            </div>
+          </div>
+
+          <div class="setting-row user-switcher">
+            <span class="setting-label">词库选择</span>
+            <span class="user-current" id="ovCurrentUser">–</span>
+            <button class="btn btn-ghost" id="ovSwitchUser">切换词库</button>
+          </div>
+
+          <div class="setting-row danger-row">
+            <span class="setting-label">数据管理</span>
+            <div class="danger-actions">
+              <button class="btn btn-ghost" id="resetProgress">重置学习进度</button>
+              <button class="btn btn-ghost" id="wipeAll">清空全部数据</button>
+            </div>
+            <p class="setting-note">重置进度保留词库、主题与 API Key；清空会回到首次使用状态。</p>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <div class="start-wrap">
+      <button class="btn btn-primary start-btn" id="startBtn">开始学习</button>
+      <button class="btn btn-ghost start-btn" id="dictationBtn">听写复习</button>
+    </div>
+  </section>
+
+  <!-- ================= 听写复习页 ================= -->
+  <section id="dictationPage" class="hidden">
+    <header class="study-topbar">
+      <div class="study-top-left">
+        <button class="mini-btn" id="dictExit" title="退出听写" aria-label="退出听写">✕</button>
+      </div>
+      <div class="dict-progress" id="dictProgress">0 / 0</div>
+    </header>
+
+    <main class="dict-stage">
+      <button class="dict-action-btn" id="dictReplay">再次朗读单词</button>
+      <button class="dict-action-btn dict-hint-btn" id="dictHint">点击朗读例句</button>
+
+      <div class="dict-input-wrap">
+        <input type="text" class="dict-input" id="dictInput"
+               placeholder="输入单词拼写" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <div class="dict-feedback hidden" id="dictFeedback"></div>
+      </div>
+
+      <button class="dict-action-btn dict-skip-btn" id="dictShowAnswer">看答案</button>
+    </main>
+  </section>
+
+  <!-- ================= 学习界面（极简：单词 + 音标） ================= -->
+  <section id="studyPage" class="hidden">
+    <header class="study-topbar">
+      <div class="study-top-left">
+        <button class="mini-btn" id="studyExit" title="退出学习" aria-label="退出学习">✕</button>
+        <button class="back-word-line hidden" id="studyBack">点击返回上一个单词</button>
+        <button class="mini-btn hidden" id="studyRefresh" title="重新生成当前词知识卡" aria-label="刷新知识卡">刷新</button>
+      </div>
+      <div class="streak-chip" id="streakChip">连对 0</div>
+    </header>
+
+    <main class="study-stage" id="studyStage">
+      <div class="word-display" id="wordDisplay">
+        <div class="word-main" id="frontMain">abandon</div>
+        <div class="word-phonetic" id="frontPhonetic">/əˈbændən/</div>
+      </div>
+
+      <div class="feedback-overlay hidden" id="feedbackOverlay"><span id="feedbackText">记住了！</span></div>
+    </main>
+  </section>
+
+  <!-- ================= 知识页（纯文本排版） ================= -->
+  <section class="kc-overlay hidden" id="knowledgeOverlay">
+    <header class="kc-header">
+      <button class="mini-btn" id="kcExit" title="退出学习" aria-label="退出学习">✕</button>
+      <button class="mini-btn" id="kcRefresh" title="重新生成知识卡" aria-label="刷新知识卡">刷新</button>
+    </header>
+
+    <div class="kc-page" id="kcSheet">
+      <div class="kc-content" id="kcContent"><!-- JS 渲染 --></div>
+
+      <!-- v1.21.0：写一遍这个单词（纯比对，不影响 FSRS） -->
+      <div class="kc-write" id="kcWrite">
+        <button class="btn btn-ghost kc-write-btn" id="kcWriteBtn">点击写一遍这个单词</button>
+        <div class="kc-write-input hidden" id="kcWriteInputWrap">
+          <div class="kc-write-row">
+            <input type="text" class="input kc-write-field" id="kcWriteInput"
+                   placeholder="输入这个单词，然后点检查" autocomplete="off" autocapitalize="off"
+                   autocorrect="off" spellcheck="false" maxlength="60">
+            <button class="btn btn-primary kc-write-check" id="kcWriteCheck" type="button">检查</button>
+          </div>
+          <div class="kc-write-feedback hidden" id="kcWriteFeedback"></div>
+        </div>
+      </div>
+
+      <div class="kc-ai">
+        <h3 class="kc-ai-head">追问 AI</h3>
+        <div class="ai-messages" id="aiMessages"></div>
+        <div class="ai-row">
+          <input type="text" class="input ai-input" id="aiInput" placeholder="问点什么都行" maxlength="200">
+          <button class="btn btn-primary ai-send" id="aiSend">发送</button>
+        </div>
+      </div>
+
+      <div class="kc-actions">
+        <div class="kc-next-hint" id="kcNextHint">顶部再上滑 = 修正并跳词 · 底部再下滑 = 跳词</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 单词明细列表 ================= -->
+  <div class="modal-backdrop hidden" id="wordListModal">
+    <div class="modal-card wordlist-card">
+      <div class="wordlist-head">
+        <div class="modal-title" id="wordListTitle">单词列表</div>
+        <div class="wordlist-head-actions">
+          <button class="btn btn-ghost" id="wordListAdd" title="添加难词">+</button>
+          <button class="btn btn-ghost" id="wordListClose">关闭</button>
+        </div>
+      </div>
+      <div class="wordlist-add-row hidden" id="wordListAddRow">
+        <input type="text" class="input" id="wordListAddInput" placeholder="输入单词" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="btn btn-primary" id="wordListAddConfirm">添加</button>
+        <button class="btn btn-ghost" id="wordListAddCancel">取消</button>
+      </div>
+      <div class="wordlist-body" id="wordListBody"></div>
+      <div class="wordlist-more" id="wordListMoreWrap">
+        <button class="btn btn-ghost hidden" id="wordListMore">加载更多</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 今日任务完成 ================= -->
+  <div class="modal-backdrop hidden" id="doneOverlay">
+    <div class="modal-card done-card">
+      <div class="modal-title">今日任务完成</div>
+      <ul class="done-stats" id="doneStats"></ul>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="doneReturnWord">返回上一个单词</button>
+        <button class="btn btn-primary" id="doneMore">再背一组</button>
+        <button class="btn btn-ghost" id="doneBack">返回学习概览</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 目标已达成提醒（超额学习前确认） ================= -->
+  <div class="modal-backdrop hidden" id="goalOverlay">
+    <div class="modal-card done-card">
+      <div class="modal-title">今日目标已达成</div>
+      <p class="modal-sub">继续背会算作超额完成，不影响复习计划。</p>
+      <ul class="done-stats" id="goalStats"></ul>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="goalContinue">再背一组</button>
+        <button class="btn btn-ghost" id="goalStop">先休息，返回概览</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../../shared/vendor/ts-fsrs-5.4.1.js"></script>
+  <script src="../../shared/fsrs-adapter.js?v=1.26.0"></script>
+  <script src="../../shared/utils.js?v=1.26.0"></script>
+  <script src="script.js?v=1.26.0"></script>
+
+  <script>
+    /* PWA：注册 Service Worker（静默，失败忽略）；updateViaCache none 确保 SW 本体不被 HTTP 缓存挡陈旧 */
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(function () {});
+    }
+  </script>
+</body>
+</html>

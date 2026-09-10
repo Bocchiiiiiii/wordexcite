@@ -1,0 +1,35 @@
+# ---- 依赖与构建产物（不入库）----
+node_modules/
+mobile-app/node_modules/
+mobile-app/android/app/build/
+mobile-app/android/build/
+mobile-app/android/.gradle/
+mobile-app/android/app/.cxx/
+mobile-app/android/local.properties
+*.apk
+*.aab
+*.tgz
+*.keystore
+*.jks
+# pack-web / cap sync 生成的前端副本（源头在仓库根目录）
+mobile-app/web/
+mobile-app/android/app/src/main/assets/public/
+
+# ---- 大体积第三方模型与生成数据（按 readme 的构建流程自行生成/下载）----
+*.onnx
+mobile-app/android/app/src/main/assets/tts/phonemes.json
+host-build/
+words/worddatas/
+verify-out/
+mobile-app/verify-out/
+
+# ---- 个人数据与私有文档（不要公开）----
+backups/
+1.md
+
+# ---- 临时文件 ----
+tmp-*.json
+*.log
+__pycache__/
+*.pyc
+scripts/batch/

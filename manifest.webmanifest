@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "你还不背？",
+  "short_name": "你还不背？",
+  "description": "你还不背？· 背单词（六级 / 雅思）",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#181a1d",
+  "theme_color": "#181a1d",
+  "icons": [
+    { "src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

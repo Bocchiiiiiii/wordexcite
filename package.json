@@ -1,0 +1,17 @@
+{
+  "name": "wordexcite",
+  "version": "1.12.1",
+  "private": true,
+  "description": "树莓派学习小站 · 六级背单词（FSRS 间隔重复，ts-fsrs）",
+  "type": "commonjs",
+  "scripts": {
+    "migrate:fsrs": "node scripts/migrate-fsrs.mjs",
+    "vendor:fsrs": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/copy-fsrs-vendor.ps1"
+  },
+  "dependencies": {
+    "ts-fsrs": "5.4.1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

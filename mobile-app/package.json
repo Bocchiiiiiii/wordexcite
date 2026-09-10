@@ -1,0 +1,26 @@
+{
+  "name": "wordexcite-android",
+  "version": "1.18.3",
+  "private": true,
+  "description": "树莓派学习小站 · 手机端 App（Capacitor Android 打包）",
+  "type": "module",
+  "scripts": {
+    "pack-web": "node scripts/pack-web.mjs",
+    "android:add": "npm run pack-web && cap add android",
+    "android:sync": "npm run pack-web && cap sync android",
+    "android:build": "npm run pack-web && cap sync android && cd android && gradlew.bat assembleDebug",
+    "android:build:unix": "npm run pack-web && cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor-community/text-to-speech": "^5.1.0",
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
