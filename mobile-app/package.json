@@ -2,7 +2,7 @@
   "name": "wordexcite-android",
   "version": "1.18.3",
   "private": true,
-  "description": "树莓派学习小站 · 手机端 App（Capacitor Android 打包）",
+  "description": "学能动的不能动 · 手机端 App（Capacitor Android 打包）",
   "type": "module",
   "scripts": {
     "pack-web": "node scripts/pack-web.mjs",

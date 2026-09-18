@@ -1,8 +1,8 @@
 {
   "name": "wordexcite",
-  "version": "1.12.1",
+  "version": "1.27.0",
   "private": true,
-  "description": "树莓派学习小站 · 六级背单词（FSRS 间隔重复，ts-fsrs）",
+  "description": "学能动的不能动 · 六级背单词（FSRS 间隔重复，ts-fsrs）",
   "type": "commonjs",
   "scripts": {
     "migrate:fsrs": "node scripts/migrate-fsrs.mjs",

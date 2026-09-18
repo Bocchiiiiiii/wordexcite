@@ -1,4 +1,4 @@
-# Enexcite · wordexcite 学习小站（六级 / 雅思背单词）
+# Enexcite · 学能动的不能动（六级 / 雅思背单词）
 
 > **交接版本：v1.00（2026-09）· 交接 README**
 > 本文件是交给下一任开发者 / AI 的**完整交接手册**。读完可直接接手开发、维护、打包、上线 APK。
@@ -123,7 +123,10 @@ D:\Coding\Enexcite\            （本仓库根）
 | 学习进度（study） | localStorage | `cet6study.v1`（"cet6"）；其他用户 `cet6study.v1.<用户名>` |
 | 当前用户 | localStorage | `currentUser` |
 | AI 知识缓存 | **IndexedDB** | 库 `wordexcite-db`、store `knowledge`（按 key 隔离，无 5MB 上限） |
+| 知识缓存兜底镜像 | localStorage | `cet6knowledge.v1.pending`（v1.27.0：IDB 写失败时才出现，启动合并重试） |
+| 单词备注（Markdown） | localStorage 主 + **IndexedDB** `notes` 镜像 | `cet6note.v1`，`{ 单词: { md, updatedAt } }`（v1.27.0） |
 | 词库 | 只读内置 JSON | `words/cet6.json` / `words/ielts.json` |
+| 预生成知识（离线种子） | 只读内置 JSON | `words/knowledge-cet6.json`（5407 条，启动种入 IndexedDB） |
 | 主题 / 口音 / AI 配置 | 内嵌于 study 数据 | 字段见下 |
 
 > 用户隔离规则（`shared/utils.js` 的 `getUserStorageKey`）：用户为空或 **"cet6"** 沿用 base key（零迁移）；
@@ -169,6 +172,24 @@ IndexedDB store `knowledge`，key = 单词（小写）。词条：
 - 内存层 `_knowledgeCache` 读写 + `requestIdleCallback` 异步增量落库（避免阻塞主线程）。
 - 首次启动自动把旧 localStorage 缓存迁移进 IndexedDB（`migrateKnowledgeFromLocalStorage`）。
 - 已生成（v2/v3 且有 etymology）的词不再自动重生成，只有手动"刷新"才强制；缺 etymology 自动补。
+- **v1.27.0 加固**：IndexedDB 连接复用（`_dbPromise`，`onversionchange`/`onclose` 自愈）；写事务结果被跟踪，
+  失败自动落 `cet6knowledge.v1.pending` 镜像并在启动时合并重试；`Utils.verifyKnowledgePersisted(word)`
+  在手动刷新后读回校验，UI 会明说"已写入本地缓存"还是"写入失败（已存镜像兜底）"。
+
+### 4.3.1 单词备注 schema（v1.27.0）
+
+存储：localStorage `cet6note.v1`（主，同步可读 —— 知识页渲染是同步的，等不了 IDB）
++ IndexedDB `wordexcite-db.notes`（镜像，防 localStorage 被清）。启动时两边按 `updatedAt` 合并。
+
+```javascript
+{ "abandon": { md: "# 记忆法
+- **abandon** = 一帮人放弃了你", updatedAt: "2026-09-18T12:33:57.805Z" } }
+```
+
+- 内容永远是 **Markdown 纯文本**；渲染交给 `shared/markdown.js`（先转义后解析，不产出可执行 HTML）。
+- **不要**把备注塞进 knowledge 词条：知识卡"刷新"是整条覆盖，备注会被冲掉。
+- 导出备份包含 `notes` 字段；从备份恢复会一并恢复。
+- 相关 API：`Utils.getNote/setNote/deleteNote/loadNotes/saveNotes/notesCount`。
 
 ### 4.4 FSRS（`shared/fsrs-adapter.js` + `shared/vendor/ts-fsrs-5.4.1.js`）
 
@@ -215,7 +236,8 @@ IndexedDB store `knowledge`，key = 单词（小写）。词条：
   - 设置：每日目标、新词/复习比例、主题、AI 模型、导入 txt、导出/恢复备份、口音、切换用户、重置进度、清空全部；
   - 「开始学习」（目标已达成且当天未提醒 → 先确认）、「听写复习」。
 - **学习页**：单词+音标居中；**手势方向**（整页可滑，阈值 50px）：上滑=记得、下滑=再练练、点击=记不清；每词自动朗读；顶栏 `✕` 退出、返回上一词、刷新（知识页打开时）、连对 N；「返回上一词」从 `appliedStack` 恢复评分快照（可连续回退）。
-- **知识页**：单词+音标 → 中文释义 → 单词变形 → 例句 → 短语 → 词根词缀 → 追问 AI（SSE 流式，会话内按词隔离上下文）。**方向术语与页面方向相反**：页面顶端+再上滑（若刚标 Good 先改记不清）→ 下一词；页面底端+再下滑 → 下一词；中间只滚动。下一词动画与淡出并行。
+- **知识页**：单词+音标 → **单词备注（有则排第一，v1.27.0）** → 中文释义 → 单词变形 → 例句 → 短语 → 词根词缀 → 追问 AI（SSE 流式，会话内按词隔离上下文）。顶栏右侧依次为「刷新」「单词备注」。**方向术语与页面方向相反**：页面顶端+再上滑（若刚标 Good 先改记不清）→ 下一词；页面底端+再下滑 → 下一词；中间只滚动。下一词动画与淡出并行。
+- **单词备注**（v1.27.0）：顶栏「单词备注」→ 编辑/预览双 Tab 编辑器（Markdown 纯文本）→ 保存后作为单词正下方第一个词条渲染；过长默认折叠；localStorage `cet6note.v1` + IndexedDB `notes` 双写，重开 App 仍在；导出备份会带上 `notes`；渲染器 `shared/markdown.js`（离线、先转义后解析）。
 - **听写复习**：到期词+难词池随机打乱 → TTS 朗读 → 拼写输入 → 回车判分（一次拼对且未用提示 = Good，否则 Again）；例句提示优先缓存、无则 AI；答对或看答案后进知识页再下滑进入下一个。
 - **添加难词**：列表右上 `+` → 输入单词 → AI 校验拼写 → 词库有则进难词池，无则新增到词库+难词池。
 
@@ -310,7 +332,8 @@ APK 拷贝到安卓手机直接安装（debug 签名，需允许"安装未知来
 - 词库：`wordBankFile / wordBankUrl / ensureWordBank / makeWordRecord / parseImportTxt`。
 - FSRS 口径：`isMasteredWord / isDueWord / wordStateName / syncDerived`。
 - 统计：`computeStats`（及 dailyGoal/newRatio 相关）。
-- 知识缓存（IndexedDB）：`loadKnowledge / saveKnowledge / getKnowledge / setKnowledge / _ensureKnowledgeLoaded / _flushKnowledge / _scheduleFlushKnowledge / loadKnowledgeFromDb / migrateKnowledgeFromLocalStorage / trimKnowledgeCache / openKnowledgeDb`。
+- 知识缓存（IndexedDB，DB v2）：`loadKnowledge / saveKnowledge / getKnowledge / setKnowledge / verifyKnowledgePersisted / isKnowledgeValid / _ensureKnowledgeLoaded / _flushKnowledge / _scheduleFlushKnowledge / loadKnowledgeFromDb / migrateKnowledgeFromLocalStorage / mergePendingKnowledge / putKnowledgeKeys / readPendingKnowledge / trimKnowledgeCache / openKnowledgeDb`。
+- 单词备注（v1.27.0）：`BASE_NOTE_KEY='cet6note.v1'`、`getNote / getNoteEntry / setNote / deleteNote / loadNotes / saveNotes / notesCount / loadNotesFromDb`。
 - 主题：`applyTheme / chooseTheme / ensureThemeChosen`。
 - 杂项：`dateStr / todayStr / addDays / daysBetween / formatCN / shuffle / clamp / toast / escapeHtml`。
 
@@ -319,7 +342,8 @@ APK 拷贝到安卓手机直接安装（debug 签名，需允许"安装未知来
 - 会话：`init / doInit / bindEvents / ensureDaily / beginSession / showCard / exitStudy`。
 - 选词：`selectSessionWords / dueMs`。
 - 评分/撤销：`onSwipe / onCardClick / onUnsure / gradeAndContinue / applyRating / updateStreak / showFeedback / captureApplied / restoreApplied / latestAppliedFor / undoLastApplied / correctionAvailable / correctGradeToUnsure / goBack`。
-- 知识页：`showKnowledge / hideKnowledge / ensureKnowledge / fetchKnowledge / refreshKnowledge / renderKnowledge* / bindKnowledgeGesture / kcNext`。
+- 知识页：`showKnowledge / hideKnowledge / ensureKnowledge / fetchKnowledge / refreshKnowledge / renderKnowledge* / knowledgeSectionsHTML / kcWordlineHTML / bindKnowledgeGesture / kcNext`。
+- 单词备注（v1.27.0）：`openNoteEditor / closeNoteEditor / saveNoteEditor / deleteNoteFromEditor / setNoteTab / syncNoteEntry / applyNoteCollapse / toggleNoteCollapse / renderNoteMarkdown`。
 - AI：`getAIConfig / callGLM / callGLMStream / extractJson / normalizeKnowledge / pregenWords / askAI`。
 - 查找：`findWordById`（O(1) `_wordById`）、`_buildWordMap / currentWord`。
 - 听写：`startDictation / dictCheck / dictShowAnswer / dictNext / dictPlayHint`。
@@ -329,6 +353,7 @@ APK 拷贝到安卓手机直接安装（debug 签名，需允许"安装未知来
 ### 9.3 其它
 
 - `shared/fsrs-adapter.js`：`FSRSAdapter.next / migrateWordRecord / stateName`。
+- `shared/markdown.js`（v1.27.0）：`WXMarkdown.render / renderInline / toPlain`——离线极简 Markdown 渲染器，先 `escapeHtml` 再解析，只产出白名单标签（`javascript:` 链接被剥除）。
 - `sw.js` / `manifest.webmanifest`：PWA 离线与安装。
 - `mobile-app/scripts/pack-web.mjs`：打包注入（见 §7.3）。
 
@@ -347,6 +372,14 @@ APK 拷贝到安卓手机直接安装（debug 签名，需允许"安装未知来
 | `cd mobile-app/android && ./gradlew assembleDebug` | 编译 APK |
 | `cd mobile-app && node scripts/verify-offline.mjs` | 离线词库验证 |
 | `cd mobile-app && node scripts/verify-idb.mjs` | IndexedDB 持久化验证 |
+| `node scripts/verify-web.mjs` | 无头浏览器冒烟（需先在 `mobile-app` 起 8760 静态服务） |
+| `node scripts/verify-askai.mjs` | 追问 AI / 深度思考 / 人设回归（16 项，自带假 AI 接口） |
+| `node scripts/verify-aimodels.mjs` | AI 模型列表一键获取回归（23 项） |
+| `node scripts/verify-markdown.mjs` | 单词备注 Markdown 渲染器回归（36 项，纯 node） |
+| `node scripts/verify-note.mjs` | 单词备注 UI + 落盘 + 折叠 + 防注入回归（30 项） |
+| `node scripts/verify-migrate.mjs` | 词库标识迁移回归（11 项，纯 node） |
+
+> 无头浏览器统一用系统已装的 Edge（`channel: 'msedge'`）；要用自带 chromium 时设 `CHROMIUM_PATH` 环境变量。
 
 ---
 
@@ -381,6 +414,9 @@ APK 拷贝到安卓手机直接安装（debug 签名，需允许"安装未知来
 9. **`global.css` 有通用 `input[type="text"]` 样式**，会覆盖自定义输入框 → 需更高特异性/`!important`。
 10. **APK/web/ 是构建产物不入库**：克隆后先 `npm install` + `pack-web` + `cap sync`，别在仓库找 `web/` 或 `.apk`。
 11. **git 换行**：仓库有 LF/CRLF 告警，`git add` 会有换行提示，属正常（`.gitattributes`/autocrlf 管理）。
+12. **原生插件别把大字段留在 `PluginCall` 里**（v1.27.0 血的教训）：Capacitor 的 `Bridge.saveInstanceState()` 会把「最后一次 `startActivityForResult` 的 PluginCall 选项」整份塞进 `savedInstanceState`，Binder 事务上限约 1MB。导出备份（知识缓存 base64 后 24MB）这么干会 `TransactionTooLargeException` **直接闪退**。做法：大内容先写 `cacheDir` 临时文件 → `call.getData().remove('data')` → 覆写 `saveInstanceState()/restoreState()` 只存文件路径。
+13. **备注别塞进 knowledge 词条**（v1.27.0）：知识卡「刷新」是整条覆盖写，备注放词条里会被冲掉；备注有自己的 `cet6note.v1` + `notes` 存储。
+14. **IndexedDB 连接要复用**（v1.27.0）：旧代码每次写都 `indexedDB.open()`，连接泄漏且 DB 版本升级时可能被 `onblocked` 卡死；现在统一走 `openKnowledgeDb()`（成功缓存、失败不缓存、`onversionchange` 自愈）。
 
 ---
 

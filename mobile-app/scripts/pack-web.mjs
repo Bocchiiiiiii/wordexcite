@@ -1,5 +1,5 @@
 /* ============================================================
- * 树莓派学习小站 · App 打包脚本
+ * 学能动的不能动 · App 打包脚本
  * 把网站静态资源（含 words/*.json 离线词库、sw.js、manifest、图标）
  * 复制到 mobile-app/web/（Capacitor 的 webDir），并对打包副本注入
  * “应用内运行时配置”，使原生 App 在联网时能同步到树莓派服务器。
@@ -42,6 +42,7 @@ const FILES = [
   'shared/global.css',
   'shared/arknights.css',
   'shared/utils.js',
+  'shared/markdown.js',
   'shared/fsrs-adapter.js',
   'shared/vendor/ts-fsrs-5.4.1.js',
   'words/cet6.json',

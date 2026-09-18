@@ -6,11 +6,11 @@
   <meta name="theme-color" content="#181a1d">
   <title>背单词 · 你还不背？</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" type="image/x-icon" href="/icons/favicon.ico?v=1.26.0">
-  <link rel="stylesheet" href="../../shared/global.css?v=1.26.0">
-  <link rel="stylesheet" href="style.css?v=1.26.0">
-  <link rel="stylesheet" href="../../shared/arknights.css?v=1.26.0">
-  <link rel="stylesheet" href="arknights.css?v=1.26.0">
+  <link rel="icon" type="image/x-icon" href="/icons/favicon.ico?v=1.27.2">
+  <link rel="stylesheet" href="../../shared/global.css?v=1.27.2">
+  <link rel="stylesheet" href="style.css?v=1.27.2">
+  <link rel="stylesheet" href="../../shared/arknights.css?v=1.27.2">
+  <link rel="stylesheet" href="arknights.css?v=1.27.2">
 </head>
 <body>
   <!-- 词库选择（完全离线，原“用户”即词库，各自独立进度） -->
@@ -210,6 +210,7 @@
   <section class="kc-overlay hidden" id="knowledgeOverlay">
     <header class="kc-header">
       <button class="mini-btn" id="kcExit" title="退出学习" aria-label="退出学习">✕</button>
+      <button class="mini-btn kc-header-note" id="kcNoteBtn" title="添加/编辑这个单词的备注" aria-label="单词备注">单词备注</button>
       <button class="mini-btn" id="kcRefresh" title="重新生成知识卡" aria-label="刷新知识卡">刷新</button>
     </header>
 
@@ -293,10 +294,33 @@
     </div>
   </div>
 
+  <!-- ================= 单词备注（v1.27.0：Markdown 纯文本，编辑/预览双 Tab） ================= -->
+  <div class="modal-backdrop hidden" id="noteModal">
+    <div class="modal-card note-card">
+      <div class="modal-title" id="noteTitle">单词备注</div>
+      <p class="modal-sub" id="noteSub">用 Markdown 记下记忆法、易混词、例句；保存后会显示在单词正下方。</p>
+      <div class="note-tabs">
+        <button class="note-tab active" id="noteTabEdit" type="button">编辑</button>
+        <button class="note-tab" id="noteTabPreview" type="button">预览</button>
+        <span class="note-count" id="noteCount">0 字</span>
+      </div>
+      <textarea class="input note-input" id="noteInput" rows="10" spellcheck="false"
+                autocapitalize="off" autocorrect="off"
+                placeholder="# 记忆法&#10;- **abandon** = 一帮人放弃了你&#10;> 例句：He abandoned the plan."></textarea>
+      <div class="note-preview hidden" id="notePreview"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="noteCancel" type="button">取消</button>
+        <button class="btn btn-ghost" id="noteDelete" type="button">删除备注</button>
+        <button class="btn btn-primary" id="noteSave" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+
   <script src="../../shared/vendor/ts-fsrs-5.4.1.js"></script>
-  <script src="../../shared/fsrs-adapter.js?v=1.26.0"></script>
-  <script src="../../shared/utils.js?v=1.26.0"></script>
-  <script src="script.js?v=1.26.0"></script>
+  <script src="../../shared/markdown.js?v=1.27.2"></script>
+  <script src="../../shared/fsrs-adapter.js?v=1.27.2"></script>
+  <script src="../../shared/utils.js?v=1.27.2"></script>
+  <script src="script.js?v=1.27.2"></script>
 
   <script>
     /* PWA：注册 Service Worker（静默，失败忽略）；updateViaCache none 确保 SW 本体不被 HTTP 缓存挡陈旧 */

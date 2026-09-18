@@ -92,7 +92,7 @@
     /* 根据词库更新页面标题 */
     var titleMap = { 'ielts.json': '雅思词汇', 'cet6.json': '六级背单词' };
     var title = titleMap[S.data.wordBank] || '背单词';
-    document.title = title + ' · 四人帮的学习小站';
+    document.title = title + ' · 学能动的不能动';
     var el = document.getElementById('pageTitle');
     if (el) el.textContent = title;
 
@@ -399,6 +399,21 @@
     /* -------- 知识卡 -------- */
     $('kcExit').addEventListener('click', exitStudy);
     $('kcRefresh').addEventListener('click', refreshKnowledge);
+    /* 单词备注（v1.27.0）：内容每次重渲染，所以用事件委托绑定行内的“编辑/展开” */
+    $('kcNoteBtn').addEventListener('click', openNoteEditor);
+    $('kcContent').addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t) return;
+      if (t.id === 'kcNoteInline') { e.preventDefault(); openNoteEditor(); return; }
+      if (t.id === 'kcNoteToggle') { e.preventDefault(); toggleNoteCollapse(); }
+    });
+    $('noteTabEdit').addEventListener('click', function () { setNoteTab('edit'); });
+    $('noteTabPreview').addEventListener('click', function () { setNoteTab('preview'); });
+    $('noteCancel').addEventListener('click', closeNoteEditor);
+    $('noteSave').addEventListener('click', saveNoteEditor);
+    $('noteDelete').addEventListener('click', deleteNoteFromEditor);
+    $('noteInput').addEventListener('input', updateNoteCount);
+    $('noteModal').addEventListener('click', function (e) { if (e.target === this) closeNoteEditor(); });
     $('aiSend').addEventListener('click', askAI);
     $('aiInput').addEventListener('keydown', function (e) {
       if (e.key === 'Enter') askAI();
@@ -1359,7 +1374,11 @@
     renderKnowledgeLoading(w);
     fetchKnowledge(w, true).then(function (k) {
       if (S.knowledgeOpen && currentWord() && currentWord().id === w.id) renderKnowledge(k);
-      Utils.toast('知识卡已刷新并更新缓存', 'success');
+      /* v1.27.0：刷新后读回来校验一次，避免「看着刷新了、其实没落盘」 */
+      Utils.verifyKnowledgePersisted(w.en).then(function (ok) {
+        if (ok) Utils.toast('知识卡已刷新并写入本地缓存', 'success');
+        else Utils.toast('知识卡已刷新，但本地缓存写入失败（已存本地镜像兜底）', 'error');
+      });
     }).catch(function (err) {
       if (S.knowledgeOpen && currentWord() && currentWord().id === w.id) renderKnowledgeError(w, err);
       Utils.toast('刷新失败：' + err.message, 'error');
@@ -1368,6 +1387,159 @@
       $('kcRefresh').classList.remove('spinning');
       $('studyRefresh').classList.remove('spinning');
     });
+  }
+
+  /* ================= 单词备注（v1.27.0） =================
+     存储：Markdown 纯文本，落 Utils.setNote（localStorage 主 + IndexedDB 镜像）。
+     展示：单词正下方第一个词条，Markdown 渲染；过长默认折叠。
+     注意：备注不进知识缓存词条——知识卡刷新会整条覆盖，备注会被冲掉。 */
+
+  var NOTE_COLLAPSE_PX = 360;     // 超过这个高度默认折叠
+  var noteState = { word: '' };
+
+  function fmtCacheTime(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  function kcWordlineHTML(en, phonetic, generatedAt) {
+    var cached = fmtCacheTime(generatedAt);
+    return '<div class="kc-wordline">' +
+      '  <div class="kc-en">' + Utils.escapeHtml(en) + '</div>' +
+      '  <div class="kc-ph">' + Utils.escapeHtml(phonetic ? '/' + phonetic + '/' : '') + '</div>' +
+      (cached ? '  <div class="kc-cache-line">已缓存到本机 · ' + Utils.escapeHtml(cached) + '</div>' : '') +
+      '</div>';
+  }
+
+  function renderNoteMarkdown(md) {
+    if (window.WXMarkdown && typeof window.WXMarkdown.render === 'function') {
+      return window.WXMarkdown.render(md);
+    }
+    /* 渲染器没加载（异常环境）：退化成纯文本，也不能丢内容 */
+    return '<p class="md-p">' + Utils.escapeHtml(md).replace(/\n/g, '<br>') + '</p>';
+  }
+
+  /* 把备注词条同步进 #kcContent（插在单词行之后；没有备注就移除） */
+  function syncNoteEntry(en) {
+    var content = $('kcContent');
+    if (!content || !en) return;
+    var wrap = content.querySelector('.kc-note-entry');
+    var md = Utils.getNote(en);
+    if (!md || !md.trim()) {
+      if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      return;
+    }
+    var html =
+      '<h3 class="kc-h kc-note-h">单词备注' +
+      '<button class="kc-note-edit" id="kcNoteInline" type="button">编辑</button></h3>' +
+      '<div class="kc-note-block" id="kcNoteBlock">' +
+      '  <div class="kc-note-body md-body" id="kcNoteBody">' + renderNoteMarkdown(md) + '</div>' +
+      '  <button class="kc-note-toggle hidden" id="kcNoteToggle" type="button">展开全部</button>' +
+      '</div>';
+    if (!wrap) {
+      wrap = document.createElement('section');
+      wrap.className = 'kc-note-entry';
+      var wl = content.querySelector('.kc-wordline');
+      if (wl) content.insertBefore(wrap, wl.nextSibling);
+      else content.insertBefore(wrap, content.firstChild);
+    }
+    wrap.innerHTML = html;
+    applyNoteCollapse(md);
+  }
+
+  function applyNoteCollapse(md) {
+    var body = $('kcNoteBody');
+    var btn = $('kcNoteToggle');
+    if (!body || !btn) return;
+    var byText = (md && (md.length > 420 || md.split('\n').length > 12)) || false;
+    var h = body.getBoundingClientRect ? body.getBoundingClientRect().height : 0;
+    var long = h > 0 ? h > NOTE_COLLAPSE_PX : byText;
+    body.classList.toggle('collapsed', long);
+    var block = $('kcNoteBlock');
+    if (block) block.classList.toggle('collapsed', long);
+    btn.classList.toggle('hidden', !long);
+    btn.textContent = '展开全部';
+  }
+
+  function toggleNoteCollapse() {
+    var body = $('kcNoteBody');
+    var btn = $('kcNoteToggle');
+    if (!body || !btn) return;
+    var collapsed = body.classList.toggle('collapsed');
+    var block = $('kcNoteBlock');
+    if (block) block.classList.toggle('collapsed', collapsed);
+    btn.textContent = collapsed ? '展开全部' : '收起';
+  }
+
+  function noteEditorWord() {
+    return noteState.word || (currentWord() ? currentWord().en : '');
+  }
+
+  function setNoteTab(tab) {
+    var preview = tab === 'preview';
+    $('noteTabEdit').classList.toggle('active', !preview);
+    $('noteTabPreview').classList.toggle('active', preview);
+    $('noteInput').classList.toggle('hidden', preview);
+    $('notePreview').classList.toggle('hidden', !preview);
+    if (preview) {
+      var md = $('noteInput').value;
+      $('notePreview').innerHTML = md.trim()
+        ? renderNoteMarkdown(md)
+        : '<p class="note-empty">还没有内容，切回「编辑」写点什么吧。</p>';
+    }
+  }
+
+  function updateNoteCount() {
+    var n = $('noteInput').value.length;
+    $('noteCount').textContent = n + ' 字';
+  }
+
+  function openNoteEditor() {
+    var w = currentWord();
+    if (!w) return;
+    noteState.word = w.en;
+    var existing = Utils.getNote(w.en) || '';
+    $('noteTitle').textContent = '单词备注';
+    $('noteSub').textContent = w.en + ' · 支持 Markdown；保存后会显示在单词正下方第一个词条。';
+    $('noteInput').value = existing;
+    $('noteDelete').classList.toggle('hidden', !existing);
+    setNoteTab('edit');
+    updateNoteCount();
+    $('noteModal').classList.remove('hidden');
+    if (!existing) {
+      setTimeout(function () {
+        try { $('noteInput').focus(); } catch (e) { /* 忽略 */ }
+      }, 30);
+    }
+  }
+
+  function closeNoteEditor() {
+    $('noteModal').classList.add('hidden');
+    $('noteInput').blur();
+  }
+
+  function saveNoteEditor() {
+    var en = noteEditorWord();
+    if (!en) { closeNoteEditor(); return; }
+    var md = $('noteInput').value;
+    Utils.setNote(en, md);
+    closeNoteEditor();
+    if (S.knowledgeOpen && currentWord() && currentWord().en === en) syncNoteEntry(en);
+    Utils.toast(md.trim() ? '备注已保存' : '备注已删除', 'success');
+  }
+
+  function deleteNoteFromEditor() {
+    var en = noteEditorWord();
+    if (!en) return;
+    if (!window.confirm('删除「' + en + '」的备注？')) return;
+    Utils.deleteNote(en);
+    $('noteInput').value = '';
+    closeNoteEditor();
+    if (S.knowledgeOpen && currentWord() && currentWord().en === en) syncNoteEntry(en);
+    Utils.toast('备注已删除', 'success');
   }
 
   /* ---------------- 知识页渲染（纯文本排版） ---------------- */
@@ -1507,11 +1679,9 @@
     var hasOverflow = sheet.scrollHeight > sheet.clientHeight + 40;
     var wasBottom = hasOverflow && kcAtBottom();
     $('kcContent').innerHTML =
-      '<div class="kc-wordline">' +
-      '  <div class="kc-en">' + Utils.escapeHtml(k.en) + '</div>' +
-      '  <div class="kc-ph">' + Utils.escapeHtml(k.phonetic ? '/' + k.phonetic + '/' : '') + '</div>' +
-      '</div>' +
+      kcWordlineHTML(k.en, k.phonetic, k.generatedAt) +
       knowledgeSectionsHTML(k);
+    syncNoteEntry(k.en);
     /* 只有内容真正溢出、且用户确实滑到了底部时，才保持贴底；
        否则一律从顶部开始阅读。 */
     if (wasBottom) sheet.scrollTop = sheet.scrollHeight;
@@ -1519,11 +1689,9 @@
 
   function renderKnowledgeLoading(w) {
     $('kcContent').innerHTML =
-      '<div class="kc-wordline">' +
-      '  <div class="kc-en">' + Utils.escapeHtml(w.en) + '</div>' +
-      '  <div class="kc-ph">' + Utils.escapeHtml(w.phonetic ? '/' + w.phonetic + '/' : '') + '</div>' +
-      '</div>' +
+      kcWordlineHTML(w.en, w.phonetic, '') +
       '<p class="kc-loading">正在生成知识内容…</p>';
+    syncNoteEntry(w.en);   // 备注与 AI 内容互不依赖：生成中也照常显示
   }
 
   function renderKnowledgeError(w, err) {
@@ -1531,12 +1699,10 @@
     var hasOverflow = sheet.scrollHeight > sheet.clientHeight + 40;
     var wasBottom = hasOverflow && kcAtBottom();
     $('kcContent').innerHTML =
-      '<div class="kc-wordline">' +
-      '  <div class="kc-en">' + Utils.escapeHtml(w.en) + '</div>' +
-      '  <div class="kc-ph">' + Utils.escapeHtml(w.phonetic ? '/' + w.phonetic + '/' : '') + '</div>' +
-      '</div>' +
+      kcWordlineHTML(w.en, w.phonetic, '') +
       '<div class="kc-error">知识内容生成失败：' + Utils.escapeHtml(err && err.message ? err.message : '未知错误') +
       '<br>可以点击右上角“刷新”重试；学习不受影响。</div>';
+    syncNoteEntry(w.en);
     if (wasBottom) sheet.scrollTop = sheet.scrollHeight;
   }
 
@@ -2584,7 +2750,8 @@
         app: 'cet6study',
         exportedAt: new Date().toISOString(),
         study: S.data,
-        knowledge: Utils.loadKnowledge()
+        knowledge: Utils.loadKnowledge(),
+        notes: Utils.loadNotes()      // v1.27.0：单词备注（Markdown 纯文本）
       };
       var name = '六级背单词备份-' + Utils.todayStr() + '.json';
       var data = JSON.stringify(backup);
@@ -2655,6 +2822,9 @@
       Utils.saveData(S.data);                 // revision 自动 +1，会同步覆盖服务器
       if (knowledge && typeof knowledge === 'object') {
         Utils.saveKnowledge(knowledge);
+      }
+      if (backup && backup.notes && typeof backup.notes === 'object') {
+        Utils.saveNotes(backup.notes);
       }
       renderOverview();
       Utils.toast('备份已恢复', 'success');

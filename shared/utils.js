@@ -1,5 +1,5 @@
 /* ============================================================
- * 四人帮的学习小站 · 通用工具函数（所有页面共享）
+ * 学能动的不能动 · 通用工具函数（所有页面共享）
  * 职责：localStorage 存取 / 主题 / 词库加载 / 统计 / 小工具
  * ============================================================ */
 (function (global) {
@@ -59,12 +59,14 @@
 
   function setCurrentUser(name) {
     try { localStorage.setItem(CURRENT_USER_KEY, name); } catch (e) { /* */ }
-    _knowledgeCache = null;   // 用户切换：使内存缓存失效
+    _knowledgeCache = null;   // 词库切换：使内存缓存失效
+    _notes = null;            // 备注按词库分开存（noteStorageKey 带后缀）
   }
 
   function clearCurrentUser() {
     try { localStorage.removeItem(CURRENT_USER_KEY); } catch (e) { /* */ }
     _knowledgeCache = null;
+    _notes = null;
   }
 
   function getUserStorageKey(baseKey) {
@@ -280,6 +282,10 @@
        启动时把本地知识缓存读进内存，并把旧 localStorage 缓存一次性迁移过去。 */
     await loadKnowledgeFromDb();
     await migrateKnowledgeFromLocalStorage();
+    /* 上一次 IDB 写失败的词条（localStorage 镜像）并回来并重试落库 */
+    await mergePendingKnowledge();
+    /* 单词备注：localStorage 为主、IDB 为镜像，两边合并 */
+    await loadNotesFromDb();
     /* 内置离线预生成知识（cet6）：App 打包进来，首次种入 IndexedDB/内存，
        覆盖的词离线直接用，不再等 AI 生成。雅思无内置数据，跳过。 */
     await seedBundledKnowledge();
@@ -324,10 +330,15 @@
     try { await apiDeleteState(kk); } catch (e) { /* 忽略 */ }
     try { localStorage.removeItem(sk); } catch (e) { /* 忽略 */ }
     try { localStorage.removeItem(kk); } catch (e) { /* 忽略 */ }
-    /* 清空 IndexedDB 知识缓存 */
+    /* 单词备注（v1.27.0） */
+    try { localStorage.removeItem(noteStorageKey()); } catch (e) { /* 忽略 */ }
+    _notes = {};
+    /* 清空 IndexedDB 知识缓存 + 备注 + 本地镜像 */
+    try { localStorage.removeItem(knowledgePendingKey()); } catch (e) { /* 忽略 */ }
     var db = await openKnowledgeDb();
     if (db) {
       try { db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).clear(); } catch (e) { /* 忽略 */ }
+      try { db.transaction(NOTES_STORE, 'readwrite').objectStore(NOTES_STORE).clear(); } catch (e) { /* 忽略 */ }
     }
   }
 
@@ -548,11 +559,15 @@
 
   /* ---- IndexedDB 底层 ---- */
   var DB_NAME = 'wordexcite-db';
-  var DB_VERSION = 1;
+  var DB_VERSION = 2;                 // v1.27.0：新增 notes 存储（单词备注）
   var IDB_STORE = 'knowledge';
+  var NOTES_STORE = 'notes';
+
+  var _dbPromise = null;              // 连接复用（旧写法每次写都新开连接：既泄漏连接，版本升级时还可能被 blocked）
 
   function openKnowledgeDb() {
-    return new Promise(function (resolve) {
+    if (_dbPromise) return _dbPromise;
+    var p = new Promise(function (resolve) {
       if (!('indexedDB' in window) || !window.indexedDB) { resolve(null); return; }
       var req;
       try { req = window.indexedDB.open(DB_NAME, DB_VERSION); }
@@ -562,10 +577,22 @@
         if (db && !db.objectStoreNames.contains(IDB_STORE)) {
           db.createObjectStore(IDB_STORE, { keyPath: 'key' });
         }
+        if (db && !db.objectStoreNames.contains(NOTES_STORE)) {
+          db.createObjectStore(NOTES_STORE, { keyPath: 'key' });
+        }
       };
-      req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { try { resolve(null); } catch (e) {} };
+      req.onsuccess = function () {
+        var db = req.result;
+        db.onversionchange = function () { try { db.close(); } catch (e) {} _dbPromise = null; };
+        db.onclose = function () { _dbPromise = null; };
+        resolve(db);
+      };
+      req.onerror = function () { resolve(null); };
+      req.onblocked = function () { resolve(null); };   // 不阻塞启动：拿不到就回退本地镜像
     });
+    _dbPromise = p;
+    p.then(function (db) { if (!db) _dbPromise = null; });   // 失败不缓存，下次调用重试
+    return p;
   }
 
   function idbRequestToPromise(req) {
@@ -627,21 +654,128 @@
     } catch (e) { /* 忽略 */ }
   }
 
-  /* 把脏词条增量写进 IndexedDB */
+  /* v1.27.0：把脏词条增量写进 IndexedDB。
+     旧实现把 store.put 包在 try 里、失败也静默——IDB 不可用（隐私模式/配额/连接被 blocked）时
+     用户会看到「刷新成功了，但下次打开还是旧卡」。现在：写入结果被跟踪，失败的词条落到
+     localStorage 镜像（写入时另存一份），启动时合并回来并重试落库。 */
+  var _kPendingMaxBytes = 700 * 1024;    // 本地镜像上限（localStorage 配额约 5MB，留足余量）
+
+  function knowledgePendingKey() {
+    return getUserStorageKey(BASE_KNOWLEDGE_KEY) + '.pending';
+  }
+
+  function readPendingKnowledge() {
+    var raw = null;
+    try { raw = localStorage.getItem(knowledgePendingKey()); } catch (e) { return {}; }
+    if (!raw) return {};
+    var obj = null;
+    try { obj = JSON.parse(raw); } catch (e) { return {}; }
+    return (obj && typeof obj === 'object') ? obj : {};
+  }
+
+  function writePendingKnowledge(map) {
+    try {
+      var json = JSON.stringify(map);
+      if (json.length > _kPendingMaxBytes) {
+        /* 超限：按 generatedAt 丢掉最旧的，优先保住最新的（用户刚刷新的那张） */
+        var keys = Object.keys(map).sort(function (a, b) {
+          return String(map[a] && map[a].generatedAt).localeCompare(String(map[b] && map[b].generatedAt));
+        });
+        while (keys.length && JSON.stringify(map).length > _kPendingMaxBytes) {
+          delete map[keys.shift()];
+        }
+        json = JSON.stringify(map);
+      }
+      if (!Object.keys(map).length) { localStorage.removeItem(knowledgePendingKey()); return; }
+      localStorage.setItem(knowledgePendingKey(), json);
+    } catch (e) { /* 连镜像都写不下：只能放弃，但会在控制台留下痕迹 */ }
+  }
+
+  function stashPendingKnowledge(keys) {
+    if (!keys || !keys.length || !_knowledgeCache) return;
+    var map = readPendingKnowledge();
+    keys.forEach(function (k) {
+      if (_knowledgeCache[k] != null) map[k] = _knowledgeCache[k];
+    });
+    writePendingKnowledge(map);
+  }
+
+  function clearPendingKnowledge(keys) {
+    var map = readPendingKnowledge();
+    var hit = false;
+    (keys || []).forEach(function (k) { if (map[k] != null) { delete map[k]; hit = true; } });
+    if (hit) writePendingKnowledge(map);
+  }
+
+  /* 写入指定词条：resolve(true) 表示事务已提交；false 表示 IDB 不可用/写入异常 */
+  function putKnowledgeKeys(keys) {
+    return openKnowledgeDb().then(function (db) {
+      if (!db || !keys.length) return false;
+      return new Promise(function (resolve) {
+        var tx;
+        try { tx = db.transaction(IDB_STORE, 'readwrite'); } catch (e) { resolve(false); return; }
+        var store = tx.objectStore(IDB_STORE);
+        var failed = 0;
+        keys.forEach(function (k) {
+          if (!_knowledgeCache || _knowledgeCache[k] == null) return;
+          try { store.put({ key: k, value: _knowledgeCache[k] }); }
+          catch (e) { failed++; }
+        });
+        tx.oncomplete = function () { resolve(failed === 0); };
+        tx.onerror = function () { resolve(false); };
+        tx.onabort = function () { resolve(false); };
+      });
+    }).catch(function () { return false; });
+  }
+
   function _persistKnowledgeDirty() {
     var keys = Object.keys(_knowledgeDirtyKeys);
     if (!keys.length) return;
     _knowledgeDirtyKeys = {};
-    openKnowledgeDb().then(function (db) {
-      if (!db) return;
+    putKnowledgeKeys(keys).then(function (ok) {
+      if (ok) { clearPendingKnowledge(keys); return; }
+      /* 落库失败：留一份 localStorage 镜像，启动时合并重试，不让用户白刷新 */
+      stashPendingKnowledge(keys);
+      try { console.warn('[knowledge] IndexedDB 写入失败，已退到 localStorage 镜像：' + keys.length + ' 条'); } catch (e) {}
+    });
+  }
+
+  /* 用户主动刷新知识卡后的「写盘校验」：读回来确认真的在本地库里（失败会退到镜像，所以只要有一份就算 OK） */
+  async function verifyKnowledgePersisted(en) {
+    _ensureKnowledgeLoaded();
+    var key = knowledgeKey(en);
+    var inMem = _knowledgeCache[key] || null;
+    if (!inMem) return false;
+    var db = await openKnowledgeDb();
+    if (db) {
       try {
-        var tx = db.transaction(IDB_STORE, 'readwrite');
-        var store = tx.objectStore(IDB_STORE);
-        keys.forEach(function (k) {
-          if (_knowledgeCache && _knowledgeCache[k] != null) store.put({ key: k, value: _knowledgeCache[k] });
+        var rec = await new Promise(function (resolve) {
+          var tx = db.transaction(IDB_STORE, 'readonly');
+          var q = tx.objectStore(IDB_STORE).get(key);
+          q.onsuccess = function () { resolve(q.result || null); };
+          q.onerror = function () { resolve(null); };
         });
-      } catch (e) { /* 忽略 */ }
-    }).catch(function () { /* 忽略 */ });
+        if (rec && rec.value && rec.value.generatedAt === inMem.generatedAt) return true;
+      } catch (e) { /* 落到下面的镜像检查 */ }
+    }
+    var pending = readPendingKnowledge();
+    return !!(pending[key] && pending[key].generatedAt === inMem.generatedAt);
+  }
+
+  /* 启动时把 IDB 里的知识缓存与本地镜像合并（镜像里的更新，覆盖旧值） */
+  async function mergePendingKnowledge() {
+    var pending = readPendingKnowledge();
+    var keys = Object.keys(pending);
+    if (!keys.length) return;
+    _ensureKnowledgeLoaded();
+    keys.forEach(function (k) {
+      var cur = _knowledgeCache[k];
+      if (!cur || String(pending[k].generatedAt || '') >= String(cur.generatedAt || '')) {
+        _knowledgeCache[k] = pending[k];
+      }
+    });
+    var ok = await putKnowledgeKeys(keys);
+    if (ok) clearPendingKnowledge(keys);
   }
 
   function _flushKnowledge() {
@@ -700,6 +834,175 @@
     if (!entry || !entry.generatedAt) return false;
     var age = Date.now() - new Date(entry.generatedAt).getTime();
     return age >= 0 && age < CACHE_TTL_DAYS * DAY_MS;
+  }
+
+  /* ---------------- 单词备注（v1.27.0，Markdown 纯文本） ----------------
+     备注是用户自己的东西，丢了没法重建，所以双写：
+       ① localStorage（同步，渲染时立刻能读到；小、可读）
+       ② IndexedDB notes 存储（异步镜像，防 localStorage 被清/超配额）
+     启动时两边合并，updatedAt 新的一方胜出。
+     注意：备注不放在知识缓存词条里——知识卡刷新会整条覆盖，备注会被冲掉。 */
+  var BASE_NOTE_KEY = 'cet6note.v1';
+  var MAX_NOTE_LEN = 20000;            // 单条备注上限（防御性，正常写不到）
+  var _notes = null;                   // { word: { md, updatedAt } }
+
+  function noteStorageKey() { return getUserStorageKey(BASE_NOTE_KEY); }
+  function noteKey(en) { return String(en == null ? '' : en).trim().toLowerCase(); }
+
+  function normalizeNoteEntry(raw) {
+    if (raw == null) return null;
+    if (typeof raw === 'string') return { md: raw, updatedAt: '' };
+    if (typeof raw === 'object' && typeof raw.md === 'string') {
+      return { md: raw.md, updatedAt: raw.updatedAt || '' };
+    }
+    return null;
+  }
+
+  function ensureNotesLoaded() {
+    if (_notes !== null) return;
+    _notes = {};
+    var raw = null;
+    try { raw = localStorage.getItem(noteStorageKey()); } catch (e) { return; }
+    if (!raw) return;
+    var obj = null;
+    try { obj = JSON.parse(raw); } catch (e) { return; }
+    if (!obj || typeof obj !== 'object') return;
+    Object.keys(obj).forEach(function (k) {
+      var e = normalizeNoteEntry(obj[k]);
+      if (e && e.md) _notes[k] = e;
+    });
+  }
+
+  function writeNotesLocal() {
+    ensureNotesLoaded();
+    try {
+      localStorage.setItem(noteStorageKey(), JSON.stringify(_notes));
+      return true;
+    } catch (e) {
+      try { console.warn('[note] localStorage 写入失败（配额？），已保留 IndexedDB 副本'); } catch (e2) {}
+      return false;
+    }
+  }
+
+  function putNoteToDb(key) {
+    return openKnowledgeDb().then(function (db) {
+      if (!db) return false;
+      return new Promise(function (resolve) {
+        var tx;
+        try { tx = db.transaction(NOTES_STORE, 'readwrite'); } catch (e) { resolve(false); return; }
+        try {
+          var store = tx.objectStore(NOTES_STORE);
+          if (_notes && _notes[key]) store.put({ key: key, value: _notes[key] });
+          else store.delete(key);
+        } catch (e) { resolve(false); return; }
+        tx.oncomplete = function () { resolve(true); };
+        tx.onerror = function () { resolve(false); };
+        tx.onabort = function () { resolve(false); };
+      });
+    }).catch(function () { return false; });
+  }
+
+  function putAllNotesToDb() {
+    ensureNotesLoaded();
+    return openKnowledgeDb().then(function (db) {
+      if (!db) return false;
+      return new Promise(function (resolve) {
+        var tx;
+        try { tx = db.transaction(NOTES_STORE, 'readwrite'); } catch (e) { resolve(false); return; }
+        try {
+          var store = tx.objectStore(NOTES_STORE);
+          store.clear();
+          Object.keys(_notes).forEach(function (k) { store.put({ key: k, value: _notes[k] }); });
+        } catch (e) { resolve(false); return; }
+        tx.oncomplete = function () { resolve(true); };
+        tx.onerror = function () { resolve(false); };
+        tx.onabort = function () { resolve(false); };
+      });
+    }).catch(function () { return false; });
+  }
+
+  /* 启动时把 IndexedDB 里的备注并回内存（updatedAt 新的胜出），并回写 localStorage */
+  async function loadNotesFromDb() {
+    ensureNotesLoaded();
+    var db = await openKnowledgeDb();
+    if (!db) return;
+    var recs = null;
+    try {
+      var tx = db.transaction(NOTES_STORE, 'readonly');
+      recs = await idbRequestToPromise(tx.objectStore(NOTES_STORE).getAll());
+    } catch (e) { return; }
+    if (!Array.isArray(recs) || !recs.length) return;
+    var changed = false;
+    recs.forEach(function (r) {
+      if (!r || !r.key) return;
+      var e = normalizeNoteEntry(r.value);
+      if (!e || !e.md) return;
+      var cur = _notes[r.key];
+      if (!cur || String(e.updatedAt || '') > String(cur.updatedAt || '')) { _notes[r.key] = e; changed = true; }
+    });
+    if (changed) writeNotesLocal();
+  }
+
+  function loadNotes() {
+    ensureNotesLoaded();
+    return _notes;
+  }
+
+  function getNote(en) {
+    ensureNotesLoaded();
+    var e = _notes[noteKey(en)];
+    return (e && e.md) ? e.md : '';
+  }
+
+  function getNoteEntry(en) {
+    ensureNotesLoaded();
+    return _notes[noteKey(en)] || null;
+  }
+
+  /* 保存备注；空内容等价于删除。返回实际保存的文本（可能被截断）。 */
+  function setNote(en, md) {
+    ensureNotesLoaded();
+    var key = noteKey(en);
+    if (!key) return '';
+    var text = String(md == null ? '' : md);
+    if (text.length > MAX_NOTE_LEN) text = text.slice(0, MAX_NOTE_LEN);
+    if (!text.trim()) { deleteNote(en); return ''; }
+    _notes[key] = { md: text, updatedAt: new Date().toISOString() };
+    writeNotesLocal();
+    putNoteToDb(key);
+    return text;
+  }
+
+  function deleteNote(en) {
+    ensureNotesLoaded();
+    var key = noteKey(en);
+    if (!key || !_notes[key]) return false;
+    delete _notes[key];
+    writeNotesLocal();
+    putNoteToDb(key);          // store.delete
+    return true;
+  }
+
+  /* 恢复备份：整表替换 */
+  function saveNotes(map) {
+    ensureNotesLoaded();
+    var next = {};
+    if (map && typeof map === 'object') {
+      Object.keys(map).forEach(function (k) {
+        var e = normalizeNoteEntry(map[k]);
+        var key = noteKey(k);
+        if (e && e.md && key) next[key] = { md: String(e.md).slice(0, MAX_NOTE_LEN), updatedAt: e.updatedAt || '' };
+      });
+    }
+    _notes = next;
+    writeNotesLocal();
+    putAllNotesToDb();
+    return _notes;
+  }
+
+  function notesCount() {
+    ensureNotesLoaded();
+    return Object.keys(_notes).length;
   }
 
   /* ---------------- 统计（概览页 + 仪表盘共用） ---------------- */
@@ -944,7 +1247,16 @@
     trimKnowledgeCache: trimKnowledgeCache,
     getKnowledge: getKnowledge,
     setKnowledge: setKnowledge,
+    verifyKnowledgePersisted: verifyKnowledgePersisted,
     isKnowledgeValid: isKnowledgeValid,
+    BASE_NOTE_KEY: BASE_NOTE_KEY,
+    getNote: getNote,
+    getNoteEntry: getNoteEntry,
+    setNote: setNote,
+    deleteNote: deleteNote,
+    loadNotes: loadNotes,
+    saveNotes: saveNotes,
+    notesCount: notesCount,
     getServerKnowledge: getServerKnowledge,
     computeStats: computeStats,
     applyTheme: applyTheme,

@@ -1,4 +1,4 @@
-/* 树莓派学习小站 · 预览/冒烟服务
+/* 学能动的不能动 · 预览/冒烟服务
  * node scripts/serve.mjs [port]
  * 静态服务 mobile-app/web/，模拟 Capacitor 以本地资源方式加载 App 内容。
  * 仅本地开发/验证用。 */

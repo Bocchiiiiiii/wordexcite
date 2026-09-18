@@ -1,4 +1,4 @@
-# 树莓派学习小站 · 手机端 App（Capacitor Android）
+# 学能动的不能动 · 手机端 App（Capacitor Android）
 
 把现有网站**全部内容**打包成真正的安卓 App（可安装、可分享 APK）。
 **核心保证：网页断网也能背单词（离线词库已内置）**——`words/cet6.json`、`words/ielts.json`

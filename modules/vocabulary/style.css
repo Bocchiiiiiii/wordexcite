@@ -362,6 +362,13 @@ button.stat-card {
   padding: 12px 16px;
 }
 
+/* v1.27.1：顶栏右侧一组按钮 ——「刷新」保持在最右（和以前一样），
+   「单词备注」紧挨着它左边；auto 外边距吃掉全部剩余空间，
+   于是 space-between 不再把按钮摊开到中间。 */
+.kc-header-note {
+  margin-left: auto;
+}
+
 .kc-page {
   flex: 1;
   overflow-y: auto;
@@ -939,3 +946,75 @@ button.stat-card {
 }
 
 /* 发音：点击单词/例句即朗读（无图标、无提示，保持界面极简） */
+
+/* ================= 单词备注编辑器（v1.27.0） =================
+   与知识页同一套方角描边皮肤：卡片顶边信号黄、按钮 .btn / .btn-ghost / .btn-primary。
+   编辑 / 预览 双 Tab（按用户建议：Markdown 纯文本 + 预览，不做所见即所得）。 */
+.note-card {
+  width: min(620px, 100%);
+}
+
+.note-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 10px;
+}
+
+.note-tab {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--ops-ink);
+  border-radius: var(--radius-ctl);
+  color: var(--ops-ink);
+  background: #fff;
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  font-weight: 700;
+  box-shadow: 2px 2px 0 rgba(24, 26, 29, 0.18);
+  cursor: pointer;
+}
+
+.note-tab:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--ops-signal);
+}
+
+.note-tab.active {
+  background: var(--ops-signal);
+  border-color: var(--ops-signal-strong);
+}
+
+.note-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-family: var(--font-data);
+  font-size: 0.8125rem;
+}
+
+.note-input {
+  width: 100%;
+  min-height: 210px;
+  max-height: 46dvh;
+  resize: vertical;
+  font-family: var(--font-data);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.note-preview {
+  min-height: 210px;
+  max-height: 46dvh;
+  overflow-y: auto;
+  padding: 14px 15px;
+  border: 1px solid var(--ops-ink);
+  border-radius: var(--radius-ctl);
+  background: #fff;
+}
+
+.note-empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 0.9375rem;
+}

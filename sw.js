@@ -1,5 +1,5 @@
 /* ============================================================
- * 树莓派学习小站 · Service Worker（PWA 离线 + 安装支撑）
+ * 学能动的不能动 · Service Worker（PWA 离线 + 安装支撑）
  * 缓存策略：
  *   - 导航（HTML 文档）     网络优先，失败回退缓存
  *   - 静态资产（CSS/JS/词库/图标/manifest） stale-while-revalidate
@@ -8,29 +8,30 @@
  * ============================================================ */
 'use strict';
 
-var CACHE = 'wxs-v1.26.0';
+var CACHE = 'wxs-v1.27.2';
 
 /* 预缓存清单：全部根绝对路径，与各 HTML 中 ?v= 引用保持一致（v1.18.0）。 */
 var PRECACHE = [
   '/',
   '/index.html',
   '/modules/vocabulary/index.html',
-  '/shared/global.css?v=1.26.0',
-  '/shared/arknights.css?v=1.26.0',
+  '/shared/global.css?v=1.27.2',
+  '/shared/arknights.css?v=1.27.2',
   '/shared/vendor/ts-fsrs-5.4.1.js',
-  '/shared/fsrs-adapter.js?v=1.26.0',
-  '/shared/utils.js?v=1.26.0',
-  '/modules/vocabulary/style.css?v=1.26.0',
-  '/modules/vocabulary/arknights.css?v=1.26.0',
-  '/modules/vocabulary/script.js?v=1.26.0',
+  '/shared/fsrs-adapter.js?v=1.27.2',
+  '/shared/markdown.js?v=1.27.2',
+  '/shared/utils.js?v=1.27.2',
+  '/modules/vocabulary/style.css?v=1.27.2',
+  '/modules/vocabulary/arknights.css?v=1.27.2',
+  '/modules/vocabulary/script.js?v=1.27.2',
   '/words/cet6.json',
   '/words/ielts.json',
   '/words/knowledge-cet6.json',
   '/manifest.webmanifest',
-  '/icons/icon-192.png?v=1.26.0',
-  '/icons/icon-512.png?v=1.26.0',
-  '/icons/icon-512-maskable.png?v=1.26.0',
-  '/icons/favicon.ico?v=1.26.0'
+  '/icons/icon-192.png?v=1.27.2',
+  '/icons/icon-512.png?v=1.27.2',
+  '/icons/icon-512-maskable.png?v=1.27.2',
+  '/icons/favicon.ico?v=1.27.2'
 ];
 
 self.addEventListener('install', function (event) {

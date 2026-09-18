@@ -1,5 +1,5 @@
 /* ============================================================
- * 树莓派学习小站 · 内置离线神经网络 TTS 验证
+ * 学能动的不能动 · 内置离线神经网络 TTS 验证
  * 起本地服务加载 web/，在浏览器（等价于 Capacitor WebView）里：
  *   1) OfflineTTS.ensureReady() 真正加载浏览器版 sherpa-onnx WASM + VITS 模型；
  *   2) OfflineTTS.say('hello') 合成出非空音频采样（数值证据），
@@ -36,8 +36,13 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(port, r));
 
-const chromiumPath = 'C:/Users/USER/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
-const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
+/* v1.27.0：原先硬编码 playwright 自带 chromium 的绝对路径（含本机用户名，已打码成 USER）→ 换机即挂。
+   改为用系统已装的 Edge（channel: 'msedge'），与仓库根 scripts/verify-*.mjs 一致；
+   需要自带 chromium 时用环境变量 CHROMIUM_PATH 覆盖。 */
+const launchOpts = process.env.CHROMIUM_PATH
+  ? { executablePath: process.env.CHROMIUM_PATH, headless: true }
+  : { channel: 'msedge', headless: true };
+const browser = await chromium.launch(launchOpts);
 const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 await context.addInitScript(() => { try { localStorage.setItem('currentUser', 'cet6'); } catch (e) {} });
 const page = await context.newPage();

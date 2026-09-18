@@ -1,5 +1,5 @@
 /* ============================================================
- * 树莓派学习小站 · App 离线词库验证脚本
+ * 学能动的不能动 · App 离线词库验证脚本
  * 用打包好的 web/ 起本地静态服务，验证：
  *   1) 仪表盘 + 背单词概览页能正常渲染；
  *   2) 通过 Service Worker 预缓存后断网，重新加载仍能显示词库统计
@@ -48,8 +48,13 @@ await new Promise((r) => server.listen(port, r));
 const base = `http://127.0.0.1:${port}`;
 await mkdir(OUT, { recursive: true });
 
-const chromiumPath = 'C:/Users/USER/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
-const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
+/* v1.27.0：原先硬编码 playwright 自带 chromium 的绝对路径（含本机用户名，已打码成 USER）→ 换机即挂。
+   改为用系统已装的 Edge（channel: 'msedge'），与仓库根 scripts/verify-*.mjs 一致；
+   需要自带 chromium 时用环境变量 CHROMIUM_PATH 覆盖。 */
+const launchOpts = process.env.CHROMIUM_PATH
+  ? { executablePath: process.env.CHROMIUM_PATH, headless: true }
+  : { channel: 'msedge', headless: true };
+const browser = await chromium.launch(launchOpts);
 const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 /* 自动选择词库“CET6”，避免卡在选择用户遮罩 */
 await context.addInitScript(() => {

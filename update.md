@@ -1,12 +1,75 @@
 # 更新日志（Update Log）
 
-> 文档用途：记录「树莓派学习小站 · 六级背单词模块」的历次变更、当前交互逻辑与数据结构。
+> 文档用途：记录「学能动的不能动 · 六级背单词模块」的历次变更、当前交互逻辑与数据结构。
 > 维护约定：以后每次改动都按版本追加一节，并同步修改「数据结构」章节中的对应字段，保证字段定义与代码一致。
 > 2026-08-17 起：根目录 `readme.md` 已重写为 v1.12.1 交接手册；原始需求文档由用户改名为 `1.md` 存档。
 
 ---
 
 ## 版本历史
+
+### v1.27.2（2026-09）· 站点更名
+
+- 首页大标题「四人帮的学习小站」→「**学能动的不能动**」（`index.html` 的 `.dash-title`）。
+- 同步改名的地方：模块页 `document.title` 后缀、`package.json` / `mobile-app/package.json` 的 description、
+  各源码与打包脚本的文件头注释、`readme.md` 标题、本文档用途行。App 内名字（`appName`）与包名不动。
+- 历史条目（v1.21.0 那次更名记录）按原样保留，不改写历史。
+- 版本：`?v=1.27.1 → 1.27.2`；`sw.js` `CACHE='wxs-v1.27.2'`。
+
+### v1.27.1（2026-09）· 知识页顶栏按钮位置微调
+
+- 「刷新」回到最右（与加「单词备注」之前一致），「单词备注」紧挨在它左边：顶栏右侧成为一组操作按钮，
+  左侧仍是退出 `✕`。实现：`.kc-header-note { margin-left: auto; }` —— auto 外边距吃掉剩余空间，
+  原本 `justify-content: space-between` 把三个按钮摊到左/中/右的问题随之消失。
+- 版本：`?v=1.27.0 → 1.27.1`；`sw.js` `CACHE='wxs-v1.27.1'`。
+
+### v1.27.0（2026-09）· 单词备注（Markdown）+ 导出闪退修复 + 知识缓存加固
+
+**Bug 1：导出备份点「保存」闪退（已定位真因并修复）**
+
+- 现象：设置 → 数据管理 → 导出备份 → 系统文件页选好位置点「保存」→ App 直接闪退。
+- 证据（`adb logcat`，真机 Mi 13 / Android 16）：
+
+  ```
+  java.lang.RuntimeException: android.os.TransactionTooLargeException: data parcel size 48881636 bytes
+  Bundle stats:
+    capacitorLastPluginCallOptions [size=24439180]
+    capacitorLastPluginCallBundle [size=24439216]
+      _json [size=24439180]
+  ```
+
+- 根因：备份里含**全部 AI 知识缓存**（内置 5407 条，JSON ~18MB，base64 后 24MB）。JS 把这 24MB 通过 `SaveDocument.save({ data })` 传给原生；Capacitor 的 `Bridge.saveInstanceState()` 会把「最后一次 `startActivityForResult` 的 PluginCall 选项」**整份序列化进 `savedInstanceState`**，而 Binder 事务上限约 1MB → 打开系统文件页／回前台时抛 `TransactionTooLargeException`，进程当场死亡（用户看到的就是「点保存闪退」）。
+- 修复（`mobile-app/android/.../SaveDocument.java`，Capacitor 官方文档建议的同一条路）：
+  1. 大字段不进 `PluginCall`：先把 base64 解码写进私有 `cacheDir` 临时文件，再 `call.getData().remove("data")`；
+  2. 覆写 `saveInstanceState()` / `restoreState()`，**只持久化那个临时文件路径**（几十字节）；
+  3. 写目标文件改为流式拷贝（64KB 缓冲），完成后删临时文件；进程被杀重建后仍能靠路径恢复写入；
+  4. 每次导出前清理上次残留的临时文件。
+- 真机验证：装新 APK → 导出 → 系统文件页 → 保存 → 文件写入成功、无闪退（logcat 无异常）。
+
+**Bug 2：刷新知识卡「好像没缓存到本地」（查证 + 加固）**
+
+- 查证方式：真机 WebView 开 CDP 远程调试，打桩 `Utils.setKnowledge` + 用假 AI 响应走完整「刷新」链路，再读 IndexedDB 校验。
+- 实测结论：**当前版本复现不出「没落盘」**——
+  - 点刷新 → `Utils.setKnowledge` → IndexedDB 立即写入，读回 `generatedAt` 一致；
+  - 整页 reload 后仍在；
+  - 内存缓存与 IndexedDB 完全一致（5407 / 5407，零差集）。
+- 但旧实现确有**静默失败通道**：`store.put` 包在 `try` 里、失败无提示也无回退；`openKnowledgeDb()` 每次写都新开连接（泄漏，且 DB 版本升级时可能被 blocked）。一旦 IndexedDB 不可用（隐私模式 / 配额 / 连接被阻塞），用户看到的正是「刷新了，下次还是旧卡」。
+- 加固（`shared/utils.js`）：
+  1. **连接复用**（成功缓存连接，`onversionchange`/`onclose` 自愈，失败不缓存，下次重试）；
+  2. **写入结果跟踪**：失败自动落 localStorage 镜像（`cet6knowledge.v1.pending`，上限 700KB，超限按时间丢最旧），启动时合并回内存并重试落库——刷新结果不会再白丢；
+  3. **写盘校验**：新增 `Utils.verifyKnowledgePersisted()`，手动刷新后读回确认，Toast 明确说「知识卡已刷新并写入本地缓存」或「缓存写入失败（已存镜像兜底）」；
+  4. 知识行显示「已缓存到本机 · MM-DD HH:MM」，缓存状态可见可自查。
+
+**新功能：单词备注（Markdown）**
+
+1. 知识页顶栏新增「单词备注」按钮（复用 `.mini-btn`，与「刷新」尺寸/配色/圆角完全一致）。
+2. 点开为「编辑 / 预览」双 Tab 编辑器（按用户建议：Markdown 纯文本 + 预览，不做所见即所得富文本），带字数统计、「取消 / 删除备注 / 保存」。CSS 复用知识页同一套方角描边皮肤。
+3. 保存后，备注是**单词正下方第一个词条**（排在「中文释义」之前），标题用与其它词条相同的 `.kc-h`；正文按 Markdown 渲染；过长默认折叠，可「展开全部 / 收起」。
+4. 存储（`shared/utils.js` 新增备注段）：localStorage `cet6note.v1` 为主（同步可读，渲染时立刻可用）+ IndexedDB `notes` 存储为镜像；启动时两边合并（`updatedAt` 新者胜）。**备注不放进知识缓存词条**——知识卡刷新是整条覆盖，放进去会被冲掉。
+5. 渲染器：新增 `shared/markdown.js`（离线、零依赖、先转义后解析）。支持标题、段落与换行、粗体/斜体/删除线、行内代码、代码块、有序/无序列表（含嵌套与任务清单）、引用、分割线、链接、图片、表格；`javascript:` 链接与裸 HTML 一律转义或剥除。
+6. 导出备份新增 `notes` 字段，从备份恢复会一并恢复备注。
+7. 回归测试：`scripts/verify-markdown.mjs`（渲染器，36/36）、`scripts/verify-note.mjs`（UI + 缓存落盘 + 折叠 + 防注入，30/30）。
+8. 版本：HTML `?v=1.26.0 → 1.27.0`；`sw.js` `CACHE='wxs-v1.27.0'`（PRECACHE 增加 `/shared/markdown.js`）；`mobile-app/scripts/pack-web.mjs` 打包清单同步加入该文件。
 
 ### v1.26.0（2026-09）· 开源前隐私清理 + 内部标识改为词库名
 
@@ -639,28 +702,22 @@ DeepSeek V4 这类**推理模型**的流式响应会先吐 `delta.reasoning_cont
 
 数据分为两类：**权威数据**（树莓派 SQLite）与**浏览器镜像缓存**（localStorage）。两者结构完全相同：
 
-| Key | 用途 |
-|---|---|
-| `cet6study.v1` | 学习进度、设置、词条状态（FSRS，v1.12.0 起） |
-| `cet6knowledge.v1` | AI 生成的知识内容缓存 |
-| （无 key）`words/cet6.json` | 内置词库文件，首次使用时读入 `cet6study.v1.words` |
+| 存储 | Key / 位置 | 用途 |
+|---|---|---|
+| localStorage | `cet6study.v1` | 学习进度、设置、词条状态（FSRS，v1.12.0 起） |
+| IndexedDB | `wordexcite-db` → store `knowledge` | AI 生成的知识内容缓存（v1.20.0 起从 localStorage 迁入，键为小写单词） |
+| localStorage | `cet6knowledge.v1.pending` | 知识缓存**写入失败时的兜底镜像**（v1.27.0；上限 700KB，启动时合并重试） |
+| localStorage | `cet6note.v1` | **单词备注**（v1.27.0）：`{ 单词: { md, updatedAt } }`，Markdown 纯文本 |
+| IndexedDB | `wordexcite-db` → store `notes` | 单词备注镜像（v1.27.0，DB 版本 1 → 2）；与 localStorage 启动合并，`updatedAt` 新者胜 |
+| （无 key） | `words/cet6.json` | 内置词库文件，首次使用时读入 `cet6study.v1.words` |
+| （无 key） | `words/knowledge-cet6.json` | App 内置离线预生成知识（5407 条），启动时把缺失词条种入 IndexedDB |
 
-同步规则（`shared/utils.js`）：
+存储规则（`shared/utils.js`）：
 
-- 页面启动 `Utils.initStorage()`：GET 服务器两个 key；有值则覆盖本地；服务器为空而本地有值则上传（老数据迁移）；
-- 每次 `saveData()` / `saveKnowledge()`：先写 localStorage，再防抖 600ms PUT 到服务器；
-- 请求失败不阻塞：保留待推送，下一次保存时自动重试；
-- `Utils.clearAllStorage()`：DELETE 服务器两个 key + 清空本地。
-
-服务器端（`server.py`）SQLite 表：
-
-```sql
-CREATE TABLE kv (
-  key TEXT PRIMARY KEY,          -- 'cet6study.v1' 或 'cet6knowledge.v1'
-  value TEXT NOT NULL,           -- JSON 字符串
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-```
+- App 已**完全本地**（`SERVER_BASE=''`）：`queuePush()` 的服务器镜像不再有对端，失败即忽略，不影响本地；
+- 页面启动 `Utils.initStorage()`：读 IndexedDB 知识缓存 → 迁移旧 localStorage 缓存 → 合并写入失败的镜像 → 合并备注；
+- `saveData()` / `setKnowledge()` / `setNote()`：写 localStorage（主）+ 对应 IndexedDB 存储（知识、备注）；
+- `Utils.clearAllStorage()`：清 localStorage 各 key + 清空 IndexedDB 的 `knowledge` / `notes` 存储（备注也会被清掉，清空前先导出备份）。
 
 ### 1. 主数据 `cet6study.v1`
 

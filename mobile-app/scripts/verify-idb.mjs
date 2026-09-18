@@ -1,5 +1,5 @@
 /* ============================================================
- * 树莓派学习小站 · 知识缓存 IndexedDB 持久化验证
+ * 学能动的不能动 · 知识缓存 IndexedDB 持久化验证
  * 打包好的 web/ 起本地服务，验证 AI 知识缓存不再写 localStorage，
  * 而是存进 IndexedDB 且能跨页面重载保留。
  * 用法：node scripts/verify-idb.mjs  （stdout 打印结果，非 0 退出=失败）
@@ -33,8 +33,13 @@ const server = createServer(async (req, res) => {
 });
 await new Promise((r) => server.listen(port, r));
 
-const chromiumPath = 'C:/Users/USER/AppData/Local/ms-playwright/chromium-1234/chrome-win64/chrome.exe';
-const browser = await chromium.launch({ executablePath: chromiumPath, headless: true });
+/* v1.27.0：原先硬编码 playwright 自带 chromium 的绝对路径（含本机用户名，已打码成 USER）→ 换机即挂。
+   改为用系统已装的 Edge（channel: 'msedge'），与仓库根 scripts/verify-*.mjs 一致；
+   需要自带 chromium 时用环境变量 CHROMIUM_PATH 覆盖。 */
+const launchOpts = process.env.CHROMIUM_PATH
+  ? { executablePath: process.env.CHROMIUM_PATH, headless: true }
+  : { channel: 'msedge', headless: true };
+const browser = await chromium.launch(launchOpts);
 const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 await context.addInitScript(() => { try { localStorage.setItem('currentUser', 'cet6'); } catch (e) {} });
 const page = await context.newPage();
